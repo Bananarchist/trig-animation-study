@@ -24,7 +24,8 @@ flip fn p2 p1 =
 
 
 type alias System =
-    { mouseDown : Bool
+    { listening : Bool
+    , mouseDown : Bool
     , keyDown : Bool
     , padBtnDown : Bool
     }
@@ -66,6 +67,27 @@ setPadDown val (Model sys vec) =
     Model { sys | padBtnDown = val } vec
 
 
+setListening : Bool -> Model -> Model
+setListening val (Model sys vec) =
+    Model { sys | listening = val } vec
+
+
+ifListening : (Model -> Model) -> Model -> Model
+ifListening fn ((Model { listening } _) as model) =
+    if listening then
+        fn model
+
+    else
+        model
+
+
+clearInput : Model -> Model
+clearInput =
+    setKeyDown False
+        >> setMouseDown False
+        >> setPadDown False
+
+
 type Status
     = Moving
     | Rotating
@@ -86,6 +108,7 @@ type Msg
     | MouseDown
     | MouseUp
     | FrameΔ Float
+    | VisibilityChanged Browser.Events.Visibility
 
 
 rotationFrequency : Float
@@ -187,7 +210,8 @@ initialAngle =
 
 initialSystem : System
 initialSystem =
-    { keyDown = False
+    { listening = True
+    , keyDown = False
     , mouseDown = False
     , padBtnDown = False
     }
@@ -207,14 +231,20 @@ init _ =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.batch
-        [ Browser.Events.onAnimationFrameDelta FrameΔ
-        , Browser.Events.onKeyUp (Json.Decode.succeed KeyUp)
-        , Browser.Events.onMouseUp (Json.Decode.succeed MouseUp)
-        , Browser.Events.onKeyDown (Json.Decode.succeed KeyDown)
-        , Browser.Events.onMouseDown (Json.Decode.succeed MouseDown)
-        ]
+subscriptions (Model sys _) =
+    if sys.listening then
+        Sub.batch
+            [ Browser.Events.onAnimationFrameDelta FrameΔ
+            , Browser.Events.onKeyUp (Json.Decode.succeed KeyUp)
+            , Browser.Events.onMouseUp (Json.Decode.succeed MouseUp)
+            , Browser.Events.onKeyDown (Json.Decode.succeed KeyDown)
+            , Browser.Events.onMouseDown (Json.Decode.succeed MouseDown)
+            , Browser.Events.onVisibilityChange VisibilityChanged
+            ]
+    else
+        Sub.batch
+            [ Browser.Events.onVisibilityChange VisibilityChanged ]
+
 
 
 sansCmd : Model -> ( Model, Cmd Msg )
@@ -226,16 +256,24 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg ((Model sys vec) as model) =
     case msg of
         KeyUp ->
-            setKeyDown False model |> sansCmd
+            ifListening (setKeyDown False) model |> sansCmd
 
         KeyDown ->
-            setKeyDown True model |> sansCmd
+            ifListening (setKeyDown True) model |> sansCmd
 
         MouseUp ->
-            setMouseDown False model |> sansCmd
+            ifListening (setMouseDown False) model |> sansCmd
 
         MouseDown ->
-            setMouseDown True model |> sansCmd
+            ifListening (setMouseDown True) model |> sansCmd
+
+        VisibilityChanged Browser.Events.Visible ->
+            setListening True model |> sansCmd
+
+        VisibilityChanged Browser.Events.Hidden ->
+            setListening False model
+                |> clearInput
+                |> sansCmd
 
         FrameΔ δ ->
             case status model of
